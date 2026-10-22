@@ -104,12 +104,13 @@ class VideoToolboxDecoder : VideoDecoder {
     /** A session taken out of use, with the frames it will never give back. */
     private class Retired(val session: VTDecompressionSessionRef?, val format: CMVideoFormatDescriptionRef?, val owed: List<Long>)
 
-    override fun configure(width: Int, height: Int) {
+    // One 4:2:0 stream: fullChroma stays false, so the server never sends an auxiliary one.
+    override fun configure(width: Int, height: Int, dual: Boolean) {
         // The server opens a new coded size with a keyframe by itself.
         dispose(lock.withLock { retire() })
     }
 
-    override fun decode(frameId: Long, data: ByteArray, keyframe: Boolean) {
+    override fun decode(frameId: Long, data: ByteArray, aux: ByteArray?, keyframe: Boolean) {
         var retired: Retired? = null
         var failed = false
         val accepted = lock.withLock {

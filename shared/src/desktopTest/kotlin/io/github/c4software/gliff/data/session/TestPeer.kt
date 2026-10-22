@@ -96,11 +96,11 @@ internal class FakeDecoder : VideoDecoder {
     val configured = CopyOnWriteArrayList<Pair<Int, Int>>()
     val decoded = LinkedBlockingQueue<Triple<Long, Int, Boolean>>()
 
-    override fun configure(width: Int, height: Int) {
+    override fun configure(width: Int, height: Int, dual: Boolean) {
         configured.add(width to height)
     }
 
-    override fun decode(frameId: Long, data: ByteArray, keyframe: Boolean) {
+    override fun decode(frameId: Long, data: ByteArray, aux: ByteArray?, keyframe: Boolean) {
         decoded.add(Triple(frameId, data.size, keyframe))
         listener?.onFrameDone(frameId)
     }

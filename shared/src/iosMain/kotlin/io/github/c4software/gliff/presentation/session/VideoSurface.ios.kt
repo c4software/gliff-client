@@ -8,6 +8,7 @@ import androidx.compose.ui.viewinterop.UIKitInteropProperties
 import androidx.compose.ui.viewinterop.UIKitView
 import io.github.c4software.gliff.data.video.VideoDecoder
 import io.github.c4software.gliff.data.video.VideoToolboxDecoder
+import io.github.c4software.gliff.domain.session.Box
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.readValue
 import platform.CoreGraphics.CGRectZero
@@ -24,12 +25,12 @@ import platform.UIKit.UIView
  */
 @OptIn(ExperimentalForeignApi::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
-actual fun VideoSurface(decoder: VideoDecoder, onReady: () -> Unit, modifier: Modifier) {
+actual fun VideoSurface(decoder: VideoDecoder, onReady: () -> Unit, picture: Box?, modifier: Modifier) {
     val layer = (decoder as? VideoToolboxDecoder)?.layer
     val ready = rememberUpdatedState(onReady)
     UIKitView(
         factory = { LayerView(layer) },
-        modifier = modifier,
+        modifier = modifier.placedAt(picture),
         properties = UIKitInteropProperties(interactionMode = null),
     )
     // The layer is there from the start: what is missing is a keyframe to draw on it.

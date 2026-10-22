@@ -1,6 +1,7 @@
 package io.github.c4software.gliff.presentation
 
 import androidx.compose.foundation.background
+import io.github.c4software.gliff.presentation.session.placedAt
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.ImageComposeScene
@@ -63,7 +64,7 @@ class ScreensTest {
         state, "val@atelier", strings, onSize = { _, _, _ -> }, onAcceptHostKey = {}, onRetry = {}, onBack = {},
         keyboardOpen = typing,
         turns = true,
-    ) { modifier -> Box(modifier.background(Color(0xFF2B4A7A))) }
+    ) { modifier, picture -> Box(modifier.placedAt(picture).background(Color(0xFF2B4A7A))) }
 
     private fun stream(width: Int, height: Int) = StreamInfo(width, height, width, height, 2000, 60, null, true, "HEADLESS-2")
 
@@ -77,7 +78,7 @@ class ScreensTest {
                     SessionState.Streaming(stream(820, 1700)), "val@atelier", French,
                     onSize = { _, _, _ -> }, onAcceptHostKey = {}, onRetry = {}, onBack = {},
                     send = { sent.add(it) },
-                ) { modifier -> Box(modifier.background(Color(0xFF2B4A7A))) }
+                ) { modifier, picture -> Box(modifier.placedAt(picture).background(Color(0xFF2B4A7A))) }
             }
         }
         try {

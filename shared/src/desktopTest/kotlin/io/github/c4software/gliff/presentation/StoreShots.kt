@@ -1,6 +1,7 @@
 package io.github.c4software.gliff.presentation
 
 import androidx.compose.foundation.background
+import io.github.c4software.gliff.presentation.session.placedAt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -85,7 +86,7 @@ class StoreShots {
         onSize = { _, _, _ -> }, onAcceptHostKey = {}, onRetry = {}, onBack = {},
         keyboardOpen = typing,
         turns = !form.wide,
-    ) { modifier -> Desktop(modifier, wide = form.wide) }
+    ) { modifier, picture -> Desktop(modifier.placedAt(picture), wide = form.wide) }
 
     @Test
     fun screenshots() {

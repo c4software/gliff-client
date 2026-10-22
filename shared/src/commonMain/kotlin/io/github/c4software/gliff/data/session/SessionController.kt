@@ -243,8 +243,11 @@ class SessionController(
                     codecs = listOf(Codec.H264),
                     maxWidth = decoder.maxWidth,
                     maxHeight = decoder.maxHeight,
-                    // One 4:2:0 stream; Dual420 waits for the two-decoder path.
-                    chroma = listOf(ChromaMode.Single420),
+                    chroma = if (decoder.fullChroma) {
+                        listOf(ChromaMode.Dual420, ChromaMode.Single420)
+                    } else {
+                        listOf(ChromaMode.Single420)
+                    },
                 ),
                 Handler(),
                 io,
@@ -284,6 +287,7 @@ class SessionController(
         private var headless = false
         private var output = ""
         private var coded: Pair<Int, Int>? = null
+        private var dual = false
 
         override fun onHello(ack: ServerMsg.HelloAck) {
             headless = ack.session.headless
@@ -291,16 +295,21 @@ class SessionController(
         }
 
         override fun onStreamConfig(config: ServerMsg.StreamConfig) {
-            if (config.codec != Codec.H264 || config.chroma != ChromaMode.Single420) {
+            val offered = config.chroma == ChromaMode.Single420 ||
+                (config.chroma == ChromaMode.Dual420 && decoder.fullChroma)
+            if (config.codec != Codec.H264 || !offered) {
                 throw ProtocolException("the server chose ${config.codec} ${config.chroma}, which was not offered")
             }
-            // Only a new coded size resets the decoder: a change of pace or
-            // of view box must not cost a keyframe.
+            // Only a new coded size or chroma resets the decoder: a change of
+            // pace or of view box must not cost a keyframe. The mirror only
+            // gets the main stream, a whole 4:2:0 picture by itself.
             val size = config.width to config.height
-            if (size != coded) {
+            val nowDual = config.chroma == ChromaMode.Dual420
+            if (size != coded || nowDual != dual) {
+                decoder.configure(config.width, config.height, nowDual)
+                if (size != coded) mirror?.configure(config.width, config.height)
                 coded = size
-                decoder.configure(config.width, config.height)
-                mirror?.configure(config.width, config.height)
+                dual = nowDual
             }
             mutableState.value = SessionState.Streaming(
                 StreamInfo(
@@ -317,8 +326,9 @@ class SessionController(
         override fun onVideoFrame(frame: ServerMsg.VideoFrame, main: ByteArray, aux: ByteArray?) {
             // Without it a decoder holds frames back, waiting for a reordering that never comes.
             val unit = if (frame.keyframe) H264.withoutReordering(main) else main
+            val auxUnit = aux?.takeIf { dual }?.let { if (frame.keyframe) H264.withoutReordering(it) else it }
             mirror?.frame(unit, frame.keyframe)
-            decoder.decode(frame.frameId, unit, frame.keyframe)
+            decoder.decode(frame.frameId, unit, auxUnit, frame.keyframe)
         }
     }
 

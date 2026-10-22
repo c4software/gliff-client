@@ -73,6 +73,7 @@ import io.github.c4software.gliff.domain.input.KeyLayout
 import io.github.c4software.gliff.domain.input.Keyboard
 import io.github.c4software.gliff.domain.input.Keys
 import io.github.c4software.gliff.domain.input.Trackpad
+import io.github.c4software.gliff.domain.session.Box
 import io.github.c4software.gliff.domain.session.Magnifier
 import io.github.c4software.gliff.domain.session.SessionState
 import io.github.c4software.gliff.domain.session.StreamInfo
@@ -87,10 +88,18 @@ import kotlin.time.TimeSource
 /**
  * Where the platform draws the decoded video. It tells `decoder` when its
  * surface comes and goes, and calls `onReady` each time a surface is there
- * to draw on.
+ * to draw on. `modifier` fills the video area; `picture` is where in it the
+ * picture goes, magnified or not (null: nothing to show yet).
  */
 @Composable
-expect fun VideoSurface(decoder: VideoDecoder, onReady: () -> Unit, modifier: Modifier)
+expect fun VideoSurface(decoder: VideoDecoder, onReady: () -> Unit, picture: Box?, modifier: Modifier)
+
+/** Lay this out as `picture`, which may stick out of the area. Null fills it. */
+fun Modifier.placedAt(picture: Box?): Modifier = layout { measurable, constraints ->
+    val box = picture ?: Box(0, 0, constraints.maxWidth, constraints.maxHeight)
+    val placeable = measurable.measure(Constraints.fixed(maxOf(box.width, 0), maxOf(box.height, 0)))
+    layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(box.x, box.y) }
+}
 
 /** A mouse pointer that shows nothing, where the platform has one. */
 @Composable
@@ -151,8 +160,8 @@ fun SessionRoute(
         layout = viewModel::layout,
         send = viewModel::send,
         keyboard = { shown, sink -> SoftKeyboard(shown, sink) },
-    ) { modifier ->
-        VideoSurface(viewModel.decoder, viewModel::requestKeyframe, modifier)
+    ) { modifier, picture ->
+        VideoSurface(viewModel.decoder, viewModel::requestKeyframe, picture, modifier)
     }
 }
 
@@ -179,7 +188,8 @@ fun SessionContent(
     keyboard: @Composable (shown: Boolean, sink: KeySink) -> Unit = { _, _ -> },
     keyboardOpen: Boolean = false,
     onClose: (() -> Unit)? = null,
-    video: @Composable (Modifier) -> Unit,
+    /** Draws the video: `fill` takes the whole area, `picture` is where the picture goes in it. */
+    video: @Composable (fill: Modifier, picture: Box?) -> Unit,
 ) {
     // The picture keeps its last geometry while the session is elsewhere
     // (reconnecting, resizing), so the last frame stays where it was.
@@ -275,23 +285,7 @@ fun SessionContent(
                         onSize(it.width, it.height, keyboardZoom(it.width, it.height, whole.width, whole.height))
                     },
             ) {
-                video(
-                    Modifier.layout { measurable, constraints ->
-                        val s = stream
-                        val box = magnifier.place(
-                            fit(
-                                s?.viewWidth ?: constraints.maxWidth,
-                                s?.viewHeight ?: constraints.maxHeight,
-                                constraints.maxWidth,
-                                constraints.maxHeight,
-                            ),
-                            constraints.maxWidth,
-                            constraints.maxHeight,
-                        )
-                        val placeable = measurable.measure(Constraints.fixed(box.width, box.height))
-                        layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(box.x, box.y) }
-                    }
-                )
+                video(Modifier.matchParentSize(), picture)
                 if (live) {
                     val haptics = LocalHapticFeedback.current
                     // The remote draws its own pointer on a private screen: ours would be a second one.

@@ -2,23 +2,29 @@ package io.github.c4software.gliff.data.video
 
 /**
  * The platform's H.264 decoder, drawing on the session's video surface. One
- * 4:2:0 stream, Annex B, parameter sets in front of every keyframe.
+ * 4:2:0 stream, or two (Dual420: a main stream and an auxiliary one carrying
+ * the chroma the main one drops) recombined into 4:4:4. Annex B, parameter
+ * sets in front of every keyframe.
  */
 interface VideoDecoder {
     /** The largest picture the device decodes; advertised to the server. */
     val maxWidth: Int
     val maxHeight: Int
 
+    /** Whether it takes Dual420; advertised to the server. */
+    val fullChroma: Boolean get() = false
+
     var listener: Listener?
 
-    /** The coded size changed: start over, the next frame is a keyframe. */
-    fun configure(width: Int, height: Int)
+    /** The coded size or the chroma changed: start over, the next frame is a keyframe. */
+    fun configure(width: Int, height: Int, dual: Boolean)
 
     /**
-     * Take one access unit. Never blocks for long, and always ends in
-     * [Listener.onFrameDone], shown or not: the server waits for it.
+     * Take one access unit, with its auxiliary half in Dual420. Never blocks
+     * for long, and always ends in [Listener.onFrameDone], shown or not: the
+     * server waits for it.
      */
-    fun decode(frameId: Long, data: ByteArray, keyframe: Boolean)
+    fun decode(frameId: Long, data: ByteArray, aux: ByteArray?, keyframe: Boolean)
 
     fun close()
 
