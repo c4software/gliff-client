@@ -139,4 +139,24 @@ class GeometryTest {
         assertNull(areaScale(2.625f, 0.5f, keyboardZoom = true, forced = true))
         assertEquals(2.625f, areaScale(2.625f, 1f, keyboardZoom = true, forced = true))
     }
+
+    @Test
+    fun sharperMirrorGrowsTheFittedScreenUpToItsOwnSize() {
+        // A 2560x1440 screen in an upright phone: 1080x607 fitted, 2160x1215 at twice.
+        assertEquals(2160 to 1214, sharperMirror(1080, 2200, 2f, 2560, 1440, 4096, 4096))
+        assertEquals(2560 to 1440, sharperMirror(1080, 2200, 4f, 2560, 1440, 4096, 4096))
+        assertEquals(1920 to 1080, sharperMirror(1080, 2200, 4f, 2560, 1440, 1920, 1920))
+        // No zoom, or a screen no larger than the window: nothing to gain.
+        assertEquals(null, sharperMirror(1080, 2200, 1f, 2560, 1440, 4096, 4096))
+        assertEquals(null, sharperMirror(1080, 2200, 3f, 1080, 608, 4096, 4096))
+    }
+
+    @Test
+    fun zoomStepRoundsUpToHalves() {
+        assertEquals(1f, zoomStep(0.8f))
+        assertEquals(1f, zoomStep(1f))
+        assertEquals(1.5f, zoomStep(1.1f))
+        assertEquals(2.5f, zoomStep(2.4f))
+        assertEquals(4f, zoomStep(9f))
+    }
 }

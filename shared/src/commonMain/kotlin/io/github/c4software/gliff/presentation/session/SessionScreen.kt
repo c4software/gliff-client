@@ -84,6 +84,7 @@ import io.github.c4software.gliff.presentation.theme.failure
 import io.github.c4software.gliff.presentation.theme.rememberStrings
 import io.github.c4software.gliff.proto.ClientMsg
 import kotlin.time.TimeSource
+import kotlinx.coroutines.delay
 
 /**
  * Where the platform draws the decoded video. It tells `decoder` when its
@@ -149,6 +150,7 @@ fun SessionRoute(
         address = ui.address,
         strings = strings,
         onSize = { w, h, zoom -> viewModel.onArea(w, h, density, zoom) },
+        onMagnified = viewModel::onMagnified,
         onAcceptHostKey = viewModel::acceptHostKey,
         onRetry = viewModel::retry,
         onBack = onBack,
@@ -176,6 +178,8 @@ fun SessionContent(
      * keeps showing as much as the whole window did.
      */
     onSize: (width: Int, height: Int, zoom: Float) -> Unit,
+    /** How many times larger the picture is pinched, once the fingers have been still for a moment. */
+    onMagnified: (zoom: Float) -> Unit = {},
     onAcceptHostKey: () -> Unit,
     onRetry: () -> Unit,
     onBack: () -> Unit,
@@ -233,6 +237,11 @@ fun SessionContent(
     val fitted = stream?.let { fit(it.viewWidth, it.viewHeight, area.width, area.height) }
     val picture = fitted?.let { magnifier.place(it, area.width, area.height) }
     val placed = rememberUpdatedState(fitted to area)
+    val magnifiedNow = rememberUpdatedState(onMagnified)
+    LaunchedEffect(magnifier.zoom) {
+        delay(MAGNIFIED_SETTLE_MS)
+        magnifiedNow.value(magnifier.zoom)
+    }
     trackpad.magnified = magnifier.zoom > 1f
     trackpad.onMagnify = { factor, dx, dy, cx, cy ->
         val (box, size) = placed.value
@@ -600,3 +609,6 @@ private fun HostKeyDialog(
         dismissButton = { TextButton(onClick = onCancel) { Text(strings.cancel) } },
     )
 }
+
+/** How long a pinch holds still before the stream is asked to follow it. */
+private const val MAGNIFIED_SETTLE_MS = 400L

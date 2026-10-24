@@ -1,1 +1,2 @@
-• Les boutons flottants s'effacent aussi devant un pavé tactile intégré, comme sur un Googlebook, et plus seulement devant une souris branchée.
+• Zoomer sur un écran recopié le fait envoyer en plus haute résolution : le texte agrandi reste net.
+• Plus d'image grise ou brouillée quand le flux change de taille ou que le décodeur prend du retard.

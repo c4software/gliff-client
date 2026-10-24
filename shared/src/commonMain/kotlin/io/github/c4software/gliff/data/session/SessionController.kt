@@ -14,6 +14,8 @@ import io.github.c4software.gliff.domain.session.StreamInfo
 import io.github.c4software.gliff.domain.session.Viewport
 import io.github.c4software.gliff.domain.session.laidLike
 import io.github.c4software.gliff.domain.session.remoteMode
+import io.github.c4software.gliff.domain.session.sharperMirror
+import io.github.c4software.gliff.domain.session.zoomStep
 import io.github.c4software.gliff.domain.time.Clock
 import io.github.c4software.gliff.proto.ChromaMode
 import io.github.c4software.gliff.proto.ClientCaps
@@ -21,6 +23,7 @@ import io.github.c4software.gliff.proto.ClientMsg
 import io.github.c4software.gliff.proto.ClipboardMsg
 import io.github.c4software.gliff.proto.Codec
 import io.github.c4software.gliff.proto.GliffException
+import io.github.c4software.gliff.proto.OutputInfo
 import io.github.c4software.gliff.proto.ProtocolException
 import io.github.c4software.gliff.proto.ServerMsg
 import io.github.c4software.gliff.transport.ChangedHostKeyException
@@ -88,6 +91,14 @@ class SessionController(
 
     @Volatile
     private var forced: Viewport? = null
+
+    /** How many times larger the picture is pinched here, in steps; see [setMagnified]. */
+    @Volatile
+    private var magnified = 1f
+
+    /** The mirrored screen, once the server has said which; null for a private one. */
+    @Volatile
+    private var mirrored: OutputInfo? = null
 
     @Volatile
     private var wanted: ClientMsg.Resize? = null
@@ -159,12 +170,33 @@ class SessionController(
         follow()
     }
 
+    /**
+     * The picture is pinched `zoom` times larger on this screen. A mirrored
+     * screen is then streamed larger, so the zoomed picture shows its real
+     * pixels rather than enlarged ones. A private screen is not: it would
+     * have to change its own size or scale, under its windows.
+     */
+    fun setMagnified(zoom: Float) {
+        if (closed) return
+        magnified = zoomStep(zoom)
+        follow()
+    }
+
     /** Ask the server for what the window, the viewer and the user now make. */
     private fun follow() {
         val view = viewer ?: window ?: return
         val mode = forced?.let { it.laidLike(view) } ?: view
         val fitting = remoteMode(mode.width, mode.height, mode.scale)
-        val size = ClientMsg.Resize(fitting.width, fitting.height, fitting.scale)
+        val screen = mirrored
+        // The web viewer sees the whole picture: it sizes the stream for itself.
+        val sharper = screen?.takeIf { viewer == null && magnified > 1f }?.let {
+            sharperMirror(
+                fitting.width, fitting.height, magnified,
+                it.width, it.height, decoder.maxWidth, decoder.maxHeight,
+            )
+        }
+        val size = sharper?.let { (w, h) -> ClientMsg.Resize(w, h, fitting.scale) }
+            ?: ClientMsg.Resize(fitting.width, fitting.height, fitting.scale)
         if (size == wanted) return
         wanted = size
         resizeLater()
@@ -292,6 +324,8 @@ class SessionController(
         override fun onHello(ack: ServerMsg.HelloAck) {
             headless = ack.session.headless
             output = ack.session.output
+            mirrored = if (headless) null else ack.outputs.firstOrNull { it.name == output } ?: ack.outputs.firstOrNull()
+            if (mirrored != null && magnified > 1f) follow()
         }
 
         override fun onStreamConfig(config: ServerMsg.StreamConfig) {

@@ -10,8 +10,6 @@ import android.os.HandlerThread
 import android.util.Log
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 
 /**
  * H.264 through `MediaCodec`, into buffers a [VideoRenderer] draws: one codec
@@ -36,11 +34,6 @@ class MediaCodecDecoder : VideoDecoder {
     @Volatile
     override var listener: VideoDecoder.Listener? = null
 
-    private val thread = HandlerThread("gliff-decoder").apply { start() }
-
-    /** Every codec calls back on it, so pairing needs no lock. */
-    private val handler = Handler(thread.looper)
-
     /** Guards the codecs' lifecycle; the frame path only reads `lanes`. */
     private val lock = Any()
     private var renderer: VideoRenderer? = null
@@ -54,7 +47,7 @@ class MediaCodecDecoder : VideoDecoder {
     /** Frames inside the codecs, with how many codecs still owe them. */
     private val pending = ConcurrentHashMap<Long, Int>()
 
-    /** Dual420 halves waiting for their other half, by frame. The handler thread only. */
+    /** Dual420 halves waiting for their other half, by frame. Under itself. */
     private val halves = HashMap<Long, Pair<Int, YuvImage>>()
 
     private val free = ConcurrentLinkedQueue<YuvImage>()
@@ -116,18 +109,15 @@ class MediaCodecDecoder : VideoDecoder {
         val parts = if (lanes.size == 2 && aux != null) listOf(data, aux) else listOf(data)
         pending[frameId] = parts.size
         var failed = false
+        // An auxiliary codec that misses a frame cannot decode the ones after it.
+        if (lanes.size == 2 && aux == null && !keyframe) lanes[1].miss()
         parts.forEachIndexed { i, part ->
             if (!lanes[i].queue(frameId, part, keyframe)) {
                 failed = true
                 done(frameId)
             }
         }
-        if (failed) {
-            waitingForKeyframe = true
-            listener?.onNeedKeyframe()
-        } else {
-            waitingForKeyframe = false
-        }
+        if (failed) lost() else if (keyframe) waitingForKeyframe = false
     }
 
     override fun close() {
@@ -136,7 +126,6 @@ class MediaCodecDecoder : VideoDecoder {
             size = null
             restart()
         }
-        thread.quitSafely()
     }
 
     /** One codec gave `frameId` back, or never will: ack it once none owes it. */
@@ -147,6 +136,12 @@ class MediaCodecDecoder : VideoDecoder {
             if (last) null else n - 1
         }
         if (last) listener?.onFrameDone(frameId)
+    }
+
+    /** A codec lost a frame: nothing goes on until a keyframe. Any thread. */
+    private fun lost() {
+        waitingForKeyframe = true
+        listener?.onNeedKeyframe()
     }
 
     /** Replace a codec that failed, unless it has been replaced already. */
@@ -167,50 +162,75 @@ class MediaCodecDecoder : VideoDecoder {
         val owed = pending.keys.toList()
         owed.forEach { pending.remove(it) }
         owed.forEach { listener?.onFrameDone(it) }
-        handler.post {
+        synchronized(halves) {
             halves.values.forEach { free.add(it.second) }
             halves.clear()
         }
 
         val renderer = renderer ?: return
         val (width, height) = size ?: return
-        val main = Lane(0, renderer, width, height)
+        val main = Lane(0, dual, renderer, width, height)
         if (!main.start()) return
         // Two codecs at once is more than some devices give: then the main stream alone.
-        val aux = if (dual) Lane(1, renderer, width, height).takeIf { it.start() } else null
+        val aux = if (dual) Lane(1, true, renderer, width, height).takeIf { it.start() } else null
+        if (dual && aux == null) main.paired = false
         lanes = listOfNotNull(main, aux)
     }
 
-    /** A picture came out of lane `index`: show it once whole. The handler thread. */
-    private fun arrived(index: Int, renderer: VideoRenderer, frameId: Long, image: YuvImage) {
-        if (lanes.size < 2) {
+    /** A picture came out of lane `index`: show it once whole. Either lane's thread. */
+    private fun arrived(index: Int, paired: Boolean, renderer: VideoRenderer, frameId: Long, image: YuvImage) {
+        if (!paired) {
             renderer.show(YuvPicture(image, null, free::add))
             return
         }
-        val other = halves.remove(frameId)
-        if (other == null || other.first == index) {
-            other?.let { free.add(it.second) }
-            halves[frameId] = index to image
-            return
+        val whole = synchronized(halves) {
+            val other = halves.remove(frameId)
+            if (other == null || other.first == index) {
+                other?.let { free.add(it.second) }
+                halves[frameId] = index to image
+                return
+            }
+            // Halves of older frames lost their other half: they will never be shown.
+            val stale = halves.keys.filter { it < frameId }
+            stale.forEach { id -> halves.remove(id)?.let { free.add(it.second) } }
+            if (index == 0) image to other.second else other.second to image
         }
-        val (main, aux) = if (index == 0) image to other.second else other.second to image
-        renderer.show(YuvPicture(main, aux, free::add))
-        // Halves of older frames lost their other half: they will never be shown.
-        val stale = halves.keys.filter { it < frameId }
-        stale.forEach { id -> halves.remove(id)?.let { free.add(it.second) } }
+        renderer.show(YuvPicture(whole.first, whole.second, free::add))
     }
 
+    /** An access unit waiting for an input buffer. */
+    private class Access(val frameId: Long, val data: ByteArray, val keyframe: Boolean)
+
+    /**
+     * One codec, on a thread of its own: in Dual420 the two copy their
+     * pictures out at the same time. Frames wait here for the codec to offer
+     * an input buffer rather than block the reader. A codec that misses one
+     * cannot decode those after it: it then takes nothing until a keyframe,
+     * which is what keeps a picture made from missing references (grey,
+     * smeared) off the screen.
+     */
     private inner class Lane(
         private val lane: Int,
+        /** Whether its pictures wait for the other lane's; cleared when that lane could not start. */
+        @Volatile var paired: Boolean,
         private val renderer: VideoRenderer,
         private val width: Int,
         private val height: Int,
     ) {
+        private val thread = HandlerThread("gliff-decoder-$lane").apply { start() }
+
         @Volatile
         private var codec: MediaCodec? = null
 
-        /** Input buffers the codec has offered. */
-        private val inputs = LinkedBlockingQueue<Int>()
+        /** Input buffers the codec has offered, and frames waiting for one. Under `this`. */
+        private val inputs = ArrayDeque<Int>()
+        private val waiting = ArrayDeque<Access>()
+
+        /** A frame was lost: only a keyframe is taken. Under `this`. */
+        private var broken = false
+
+        /** Held while a picture is copied out, so the codec is not stopped under it. */
+        private val output = Any()
 
         fun start(): Boolean = try {
             val format = MediaFormat.createVideoFormat(MIME, width, height).apply {
@@ -221,11 +241,11 @@ class MediaCodecDecoder : VideoDecoder {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
             }
             val created = MediaCodec.createDecoderByType(MIME)
-            created.setCallback(Callback(), handler)
+            created.setCallback(Callback(), Handler(thread.looper))
             // No csd: SPS and PPS arrive in front of every keyframe.
             created.configure(format, null, null, 0)
-            created.start()
             codec = created
+            created.start()
             Log.i(TAG, "decoder ${created.name} at ${width}x$height${if (lane == 1) ", auxiliary" else ""}")
             true
         } catch (e: Exception) {
@@ -235,58 +255,129 @@ class MediaCodecDecoder : VideoDecoder {
         }
 
         fun release() {
-            codec?.let { old ->
-                codec = null
-                runCatching { old.stop() }
-                runCatching { old.release() }
+            val old = synchronized(output) { codec.also { codec = null } }
+            old?.let {
+                runCatching { it.stop() }
+                runCatching { it.release() }
             }
-            inputs.clear()
+            val dropped = synchronized(this) {
+                inputs.clear()
+                waiting.toList().also { waiting.clear() }
+            }
+            dropped.forEach { done(it.frameId) }
+            thread.quitSafely()
         }
 
-        /** Hand `data` to the codec; false when it could not take it. */
+        /** A frame went past it: only a keyframe is taken now. */
+        fun miss() {
+            synchronized(this) { broken = true }
+        }
+
+        /** Hand `data` to the codec, now or once it has room; false when it was dropped. */
         fun queue(frameId: Long, data: ByteArray, keyframe: Boolean): Boolean {
-            val codec = codec ?: return false
-            return try {
-                // No free input buffer for this long means the codec is stuck.
-                val index = inputs.poll(INPUT_WAIT_MS, TimeUnit.MILLISECONDS)
-                val buffer = index?.let { codec.getInputBuffer(it) }
-                if (index == null || buffer == null || buffer.capacity() < data.size) {
-                    Log.w(TAG, "dropping frame $frameId: ${if (index == null) "no input buffer" else "too large"}")
-                    index?.let { inputs.add(it) }
-                    return false
+            val dropped = ArrayList<Long>()
+            var stuck = false
+            val taken = synchronized(this) {
+                when {
+                    codec == null -> false
+                    keyframe -> {
+                        // What still waits is older than a picture that does without it.
+                        waiting.forEach { dropped.add(it.frameId) }
+                        waiting.clear()
+                        broken = false
+                        waiting.add(Access(frameId, data, true))
+                        true
+                    }
+                    broken -> false
+                    waiting.size >= MAX_WAITING -> {
+                        // Even a keyframe could not get in: the codec is stuck, not just busy.
+                        stuck = waiting.first().keyframe
+                        waiting.forEach { dropped.add(it.frameId) }
+                        waiting.clear()
+                        broken = true
+                        Log.w(TAG, "dropping frames up to $frameId: the decoder is ${if (stuck) "stuck" else "behind"}")
+                        false
+                    }
+                    else -> {
+                        waiting.add(Access(frameId, data, false))
+                        true
+                    }
                 }
-                buffer.clear()
-                buffer.put(data)
-                codec.queueInputBuffer(index, 0, data.size, frameId, if (keyframe) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
-                true
-            } catch (e: IllegalStateException) {
-                // Also MediaCodec.CodecException; or the codec was released under us.
-                Log.w(TAG, "decode failed", e)
+            }
+            dropped.forEach(::done)
+            if (stuck) recover(this) else if (taken) feed()
+            return taken
+        }
+
+        /** Put waiting frames in the buffers the codec offered, in order. */
+        private fun feed() {
+            val dropped = ArrayList<Long>()
+            var failed = false
+            synchronized(this) {
+                val codec = codec ?: return
+                while (inputs.isNotEmpty() && waiting.isNotEmpty() && !failed) {
+                    val unit = waiting.removeFirst()
+                    val index = inputs.removeFirst()
+                    try {
+                        val buffer = codec.getInputBuffer(index)
+                        if (buffer == null || buffer.capacity() < unit.data.size) {
+                            Log.w(TAG, "dropping frame ${unit.frameId}: too large")
+                            inputs.addFirst(index)
+                            dropped.add(unit.frameId)
+                            waiting.forEach { dropped.add(it.frameId) }
+                            waiting.clear()
+                            broken = true
+                            break
+                        }
+                        buffer.clear()
+                        buffer.put(unit.data)
+                        val flags = if (unit.keyframe) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                        codec.queueInputBuffer(index, 0, unit.data.size, unit.frameId, flags)
+                    } catch (e: IllegalStateException) {
+                        // Also MediaCodec.CodecException; or the codec was released under us.
+                        Log.w(TAG, "decode failed", e)
+                        dropped.add(unit.frameId)
+                        failed = true
+                    }
+                }
+            }
+            dropped.forEach(::done)
+            if (failed) {
                 recover(this)
-                false
+            } else if (dropped.isNotEmpty()) {
+                lost()
             }
         }
 
         private inner class Callback : MediaCodec.Callback() {
             override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
-                if (this@Lane.codec === codec) inputs.add(index)
+                synchronized(this@Lane) {
+                    if (this@Lane.codec !== codec) return
+                    inputs.add(index)
+                }
+                feed()
             }
 
             override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
                 val frameId = info.presentationTimeUs
                 var picture: YuvImage? = null
-                try {
-                    if (this@Lane.codec === codec && info.size > 0) {
-                        codec.getOutputImage(index)?.use { image ->
-                            val w = minOf(width, image.width) and 1.inv()
-                            val h = minOf(height, image.height) and 1.inv()
-                            picture = (free.poll() ?: YuvImage()).apply { copy(image, w, h) }
+                synchronized(output) {
+                    if (this@Lane.codec !== codec) return@synchronized
+                    try {
+                        if (info.size > 0) {
+                            codec.getOutputImage(index)?.use { image ->
+                                val w = minOf(width, image.width) and 1.inv()
+                                val h = minOf(height, image.height) and 1.inv()
+                                picture = (free.poll() ?: YuvImage()).apply { copy(image, w, h) }
+                            }
                         }
+                        codec.releaseOutputBuffer(index, false)
+                    } catch (_: IllegalStateException) {
+                        picture?.let(free::add)
+                        picture = null
                     }
-                    codec.releaseOutputBuffer(index, false)
-                } catch (_: IllegalStateException) {
                 }
-                picture?.let { arrived(lane, renderer, frameId, it) }
+                picture?.let { arrived(lane, paired, renderer, frameId, it) }
                 done(frameId)
             }
 
@@ -302,6 +393,8 @@ class MediaCodecDecoder : VideoDecoder {
     private companion object {
         const val TAG = "gliff"
         const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
-        const val INPUT_WAIT_MS = 400L
+
+        /** About a fifth of a second at 60 fps: past that the codec is behind for good. */
+        const val MAX_WAITING = 12
     }
 }

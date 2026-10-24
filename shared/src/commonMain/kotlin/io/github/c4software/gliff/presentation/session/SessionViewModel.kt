@@ -71,6 +71,9 @@ class SessionViewModel(
         areaScale(density, zoom, options.keyboardZoom, forced)?.let { controller.setWindowSize(width, height, it) }
     }
 
+    /** The picture is pinched `zoom` times larger, and has been still for a moment. */
+    fun onMagnified(zoom: Float) = controller.setMagnified(zoom)
+
     fun acceptHostKey() = controller.acceptHostKey()
 
     fun retry() = controller.start()

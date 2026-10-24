@@ -1,1 +1,2 @@
-• The floating buttons now also step aside for a built-in touchpad, as on a Googlebook, and not only for a plugged-in mouse.
+• Zooming in on a mirrored screen has it sent at a higher resolution: enlarged text stays sharp.
+• No more grey or smeared picture when the stream changes size or the decoder falls behind.

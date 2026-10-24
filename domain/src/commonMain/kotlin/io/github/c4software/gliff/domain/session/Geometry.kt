@@ -1,6 +1,7 @@
 package io.github.c4software.gliff.domain.session
 
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /** A rectangle in pixels. */
@@ -69,6 +70,44 @@ fun remoteMode(width: Int, height: Int, scale: Float): RemoteMode {
     }
     return best
 }
+
+/**
+ * What to ask a mirrored screen of `outputWidth x outputHeight` for, so that
+ * a picture pinched `zoom` times larger in a `width x height` window gets the
+ * pixels it shows: the screen fitted in the window, that many times larger,
+ * up to the screen's own size and to what the decoder takes (`maxWidth x
+ * maxHeight`). Null when that is no larger than the window alone gives. The
+ * mirror's output does not change: the server only encodes it larger.
+ */
+fun sharperMirror(
+    width: Int,
+    height: Int,
+    zoom: Float,
+    outputWidth: Int,
+    outputHeight: Int,
+    maxWidth: Int,
+    maxHeight: Int,
+): Pair<Int, Int>? {
+    val shown = fit(outputWidth, outputHeight, width, height)
+    if (shown.width <= 0 || shown.height <= 0) return null
+    val factor = minOf(
+        zoom,
+        outputWidth.toFloat() / shown.width,
+        maxWidth.toFloat() / shown.width,
+        maxHeight.toFloat() / shown.height,
+    )
+    if (factor < MIN_SHARPER) return null
+    // The height from the screen's own aspect: the fitted box lost a fraction of a pixel.
+    val w = (shown.width * factor).roundToInt().coerceAtMost(minOf(outputWidth, maxWidth))
+    val h = (w.toLong() * outputHeight / outputWidth).toInt().coerceAtMost(maxHeight)
+    return (w and 1.inv()) to (h and 1.inv())
+}
+
+/** A pinch rounded up to the next half: each step costs a keyframe, so the stream does not follow every finger move. */
+fun zoomStep(zoom: Float): Float = (ceil(zoom * 2) / 2).coerceIn(1f, Magnifier.MAX_ZOOM)
+
+/** Less than this more pixels is not worth a keyframe. */
+private const val MIN_SHARPER = 1.2f
 
 /** This resolution turned the way of `view`: upright for an upright window. */
 fun Viewport.laidLike(view: Viewport): Viewport {
