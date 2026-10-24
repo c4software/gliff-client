@@ -321,6 +321,19 @@ class SessionController(
         private var coded: Pair<Int, Int>? = null
         private var dual = false
 
+        /**
+         * The first stream, set up before the server read the size asked for:
+         * the next one replaces it at once, so it is not decoded (two decoders
+         * and a keyframe for nothing). Taken after all, on a keyframe, if no
+         * other has come within [PROVISIONAL_MS]: then `settled` is set.
+         */
+        @Volatile
+        private var provisional: ServerMsg.StreamConfig? = null
+
+        @Volatile
+        private var settled = false
+        private var configs = 0
+
         override fun onHello(ack: ServerMsg.HelloAck) {
             headless = ack.session.headless
             output = ack.session.output
@@ -329,6 +342,23 @@ class SessionController(
         }
 
         override fun onStreamConfig(config: ServerMsg.StreamConfig) {
+            // The server streams before reading anything: a size sent with the
+            // handshake comes second.
+            if (configs++ == 0 && requested != null) {
+                provisional = config
+                scope.launch {
+                    delay(PROVISIONAL_MS)
+                    if (provisional == null) return@launch
+                    settled = true
+                    requestKeyframe()
+                }
+                return
+            }
+            provisional = null
+            apply(config)
+        }
+
+        private fun apply(config: ServerMsg.StreamConfig) {
             val offered = config.chroma == ChromaMode.Single420 ||
                 (config.chroma == ChromaMode.Dual420 && decoder.fullChroma)
             if (config.codec != Codec.H264 || !offered) {
@@ -358,6 +388,14 @@ class SessionController(
         }
 
         override fun onVideoFrame(frame: ServerMsg.VideoFrame, main: ByteArray, aux: ByteArray?) {
+            provisional?.let { first ->
+                if (!settled || !frame.keyframe) {
+                    session?.send(ClientMsg.FrameAck(frame.frameId, clock.nowMs()))
+                    return
+                }
+                provisional = null
+                apply(first)
+            }
             // Without it a decoder holds frames back, waiting for a reordering that never comes.
             val unit = if (frame.keyframe) H264.withoutReordering(main) else main
             val auxUnit = aux?.takeIf { dual }?.let { if (frame.keyframe) H264.withoutReordering(it) else it }
@@ -370,5 +408,8 @@ class SessionController(
         const val RESIZE_DEBOUNCE_MS = 150L
         const val MIN_WINDOW = 64
         const val KEYFRAME_REQUEST_GAP_MS = 250L
+
+        /** How long the first stream may wait for the one sized for the window. */
+        const val PROVISIONAL_MS = 500L
     }
 }

@@ -1,2 +1,1 @@
-• Zooming in on a mirrored screen has it sent at a higher resolution: enlarged text stays sharp.
-• No more grey or smeared picture when the stream changes size or the decoder falls behind.
+• A session starts straight at the right size, without first going through the mirrored screen's full resolution.

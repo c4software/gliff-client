@@ -128,6 +128,39 @@ class SessionControllerTest {
     }
 
     @Test
+    fun theStreamBeforeTheWindowSizeIsNotDecoded() {
+        trusted()
+        controller.setWindowSize(1080, 2200, 2.5f)
+        controller.start()
+        val p = peer()
+        // Streamed before the server read the size: acked, not decoded.
+        p.handshake(config(2560, 1440))
+        assertEquals(ClientMsg.Resize(1080, 2200, 2.5f), p.expect())
+        p.writer.write(ServerMsg.VideoFrame(0, 0, true, emptyList(), 100, 0), ByteArray(100))
+        assertEquals(ClientMsg.FrameAck(0, 4242), p.expect())
+        p.writer.write(config(1080, 608))
+        p.writer.write(ServerMsg.VideoFrame(1, 0, true, emptyList(), 100, 0), ByteArray(100))
+        assertEquals(Triple(1L, 100, true), decoder.decoded.poll(5, TimeUnit.SECONDS))
+        assertEquals(listOf(1080 to 608), decoder.configured.toList())
+    }
+
+    @Test
+    fun theFirstStreamIsTakenWhenNoOtherComes() {
+        trusted()
+        controller.setWindowSize(1920, 1080, 1f)
+        controller.start()
+        val p = peer()
+        p.handshake(config())
+        assertEquals(ClientMsg.Resize(1920, 1080, 1f), p.expect())
+        // The server kept its size and said nothing more: a keyframe is asked for, and decoded.
+        assertEquals(ClientMsg.RequestKeyframe, p.expect())
+        p.writer.write(ServerMsg.VideoFrame(5, 0, true, emptyList(), 100, 0), ByteArray(100))
+        assertEquals(Triple(5L, 100, true), decoder.decoded.poll(5, TimeUnit.SECONDS))
+        assertEquals(listOf(1920 to 1080), decoder.configured.toList())
+        awaitState<SessionState.Streaming>()
+    }
+
+    @Test
     fun aDraggedWindowEdgeSendsOnlyWhereItStops() {
         trusted()
         controller.setWindowSize(1000, 800, 1f)
@@ -135,6 +168,7 @@ class SessionControllerTest {
         val p = peer()
         p.handshake(config())
         assertEquals(ClientMsg.Resize(1000, 800, 1f), p.expect())
+        p.writer.write(config(1000, 800))
         for (w in 1001..1040) {
             controller.setWindowSize(w, 800, 1f)
             Thread.sleep(5)
@@ -156,6 +190,7 @@ class SessionControllerTest {
         val p = peer()
         p.handshake(config())
         assertEquals(ClientMsg.Resize(1080, 2200, 2.5f), p.expect())
+        p.writer.write(config(1080, 2200))
         controller.setViewer(Viewport(2560, 1440, 1f))
         assertEquals(ClientMsg.Resize(2560, 1440, 1f), p.expect())
         // This device's window is remembered, not asked for: the keyboard came up.
@@ -178,6 +213,7 @@ class SessionControllerTest {
         p.handshake(config())
         // Upright, as the window is.
         assertEquals(ClientMsg.Resize(1440, 2560, 1f), p.expect())
+        p.writer.write(config(1440, 2560))
         controller.setWindowSize(2200, 1080, 2.5f)
         assertEquals(ClientMsg.Resize(2560, 1440, 1f), p.expect())
         // A browser of another size changes nothing, unless it stands the other way.
@@ -252,6 +288,7 @@ class SessionControllerTest {
         second.handshake(config())
         // A new server knows nothing of the old one's size.
         assertEquals(ClientMsg.Resize(800, 600, 1f), second.expect())
+        second.writer.write(config(800, 600))
         awaitState<SessionState.Streaming>()
     }
 

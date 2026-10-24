@@ -22,6 +22,7 @@ private const val USAGE = """gliff probe: connect to a gliff server and dump its
 
   --headless WxH       ask the server for a private headless output of that size
   --output NAME        mirror this output (default: the focused one)
+  --window WxH         a mirror: the window the stream is fitted to, sent at once
   --scale S            display scale sent with the headless size (default 1)
   --out FILE           where the Annex B stream goes (default out.h264)
   --seconds N          how long to run (default 120, 0 = until the server stops)
@@ -36,6 +37,7 @@ Then: ffplay out.h264"""
 private class Options(args: Array<String>) {
     var target: String? = null
     var headless: Pair<Int, Int>? = null
+    var window: Pair<Int, Int>? = null
     var output: String? = null
     var scale = 1f
     var out = "out.h264"
@@ -50,6 +52,8 @@ private class Options(args: Array<String>) {
         fun value(): String = args.getOrNull(++i) ?: fail("${args[i - 1]} needs a value")
         while (i < args.size) {
             when (val a = args[i]) {
+                "--window" -> window = value().lowercase().split('x').mapNotNull { it.toIntOrNull() }
+                    .takeIf { it.size == 2 }?.let { it[0] to it[1] } ?: fail("--window expects WxH")
                 "--headless" -> headless = value().lowercase().split('x').mapNotNull { it.toIntOrNull() }
                     .takeIf { it.size == 2 }?.let { it[0] to it[1] } ?: fail("--headless expects WxH")
                 "--output" -> output = value()
@@ -162,7 +166,7 @@ fun main(args: Array<String>) {
         keymap = transport.keymap,
     )
     println("keymap: ${transport.keymap.length} bytes from the remote")
-    o.headless?.let { (w, h) -> session.send(ClientMsg.Resize(w, h, o.scale)) }
+    (o.headless ?: o.window)?.let { (w, h) -> session.send(ClientMsg.Resize(w, h, o.scale)) }
     Runtime.getRuntime().addShutdownHook(Thread { session.close() })
     val status = try {
         runBlocking {

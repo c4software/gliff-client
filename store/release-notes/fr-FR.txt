@@ -1,2 +1,1 @@
-• Zoomer sur un écran recopié le fait envoyer en plus haute résolution : le texte agrandi reste net.
-• Plus d'image grise ou brouillée quand le flux change de taille ou que le décodeur prend du retard.
+• La connexion démarre directement à la bonne taille, sans passer d'abord par la pleine résolution de l'écran recopié.
