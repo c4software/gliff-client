@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
@@ -31,6 +33,8 @@ import io.github.c4software.gliff.domain.session.StreamInfo
 import io.github.c4software.gliff.domain.settings.Settings
 import io.github.c4software.gliff.presentation.machines.MachinesContent
 import io.github.c4software.gliff.presentation.session.SessionContent
+import io.github.c4software.gliff.presentation.session.SessionTab
+import io.github.c4software.gliff.presentation.session.SessionTabBar
 import io.github.c4software.gliff.presentation.settings.SettingsDialog
 import io.github.c4software.gliff.presentation.theme.English
 import io.github.c4software.gliff.presentation.theme.French
@@ -75,9 +79,26 @@ class StoreShots {
         Machine(id = "3", user = "val", host = "192.168.1.20", port = 2222, headless = false),
     )
 
+    /** What the tiles show: the drawn desktop, as a session would have captured it. */
+    private val previews: Map<String, ImageBitmap> by lazy {
+        mapOf("1" to picture(step = DEMO_STEPS), "2" to picture(step = 4))
+    }
+
+    private fun picture(step: Int): ImageBitmap {
+        val scene = ImageComposeScene(960, 540, Density(1f)) { GliffTheme { Desktop(Modifier.fillMaxSize(), wide = true, step = step) } }
+        try {
+            scene.render(0)
+            return scene.render(500_000_000).toComposeImageBitmap()
+        } finally {
+            scene.close()
+        }
+    }
+
     @Composable
-    private fun Machines(strings: Strings) =
-        MachinesContent(machines, strings, onOpen = {}, onAdd = {}, onEdit = {}, onDelete = {}, onShowKey = {})
+    private fun Machines(strings: Strings) = MachinesContent(
+        machines, strings, onOpen = {}, onAdd = {}, onEdit = {}, onDelete = {}, onShowKey = {},
+        previews = previews, open = setOf("1", "2"),
+    )
 
     @Composable
     private fun Session(form: Form, strings: Strings, typing: Boolean = false) = SessionContent(
@@ -86,6 +107,9 @@ class StoreShots {
         onSize = { _, _, _ -> }, onAcceptHostKey = {}, onRetry = {}, onBack = {},
         keyboardOpen = typing,
         turns = !form.wide,
+        tabs = {
+            SessionTabBar(machines.take(2).map { SessionTab(it.id, it) }, "1", strings, {}, {}, {})
+        },
     ) { modifier, picture -> Desktop(modifier.placedAt(picture), wide = form.wide) }
 
     @Test

@@ -1,8 +1,11 @@
 package io.github.c4software.gliff.presentation.machines
 
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.c4software.gliff.data.mirror.WebMirror
+import io.github.c4software.gliff.data.preview.NoPreviews
+import io.github.c4software.gliff.data.preview.Previews
 import io.github.c4software.gliff.di.AppDispatchers
 import io.github.c4software.gliff.domain.identity.Identity
 import io.github.c4software.gliff.domain.machine.Machine
@@ -28,6 +31,10 @@ data class MachinesUiState(
     val mirrorUrls: List<String>? = null,
     /** The line for `authorized_keys`, null until it has been read. */
     val authorizedKey: String? = null,
+    /** What each machine's screen last looked like, by machine id. */
+    val previews: Map<String, ImageBitmap> = emptyMap(),
+    /** The machines whose session is open. */
+    val open: Set<String> = emptySet(),
 )
 
 class MachinesViewModel(
@@ -36,6 +43,8 @@ class MachinesViewModel(
     private val identity: Identity,
     mirror: WebMirror?,
     private val dispatchers: AppDispatchers,
+    private val previews: Previews = NoPreviews,
+    open: Flow<Set<String>> = flowOf(emptySet()),
 ) : ViewModel() {
     private val authorizedKey = MutableStateFlow<String?>(null)
 
@@ -46,13 +55,23 @@ class MachinesViewModel(
             .flowOn(dispatchers.io)
     } ?: flowOf(null)
 
+    private val sessions = combine(previews.pictures, open, ::Pair)
+
     val uiState: StateFlow<MachinesUiState> =
-        combine(machines.machines, settings.settings, mirrorUrls, authorizedKey, ::MachinesUiState)
-            .stateIn(viewModelScope, UiStateSharing, MachinesUiState(machines.machines.value, settings.settings.value))
+        combine(machines.machines, settings.settings, mirrorUrls, authorizedKey, sessions) { all, options, urls, key, (pictures, opened) ->
+            MachinesUiState(all, options, urls, key, pictures, opened)
+        }.stateIn(
+            viewModelScope,
+            UiStateSharing,
+            MachinesUiState(machines.machines.value, settings.settings.value, previews = previews.pictures.value),
+        )
 
     fun save(machine: Machine) = machines.save(machine)
 
-    fun remove(machine: Machine) = machines.remove(machine.id)
+    fun remove(machine: Machine) {
+        machines.remove(machine.id)
+        previews.remove(machine.id)
+    }
 
     fun updateSettings(changed: Settings) = settings.update { changed }
 

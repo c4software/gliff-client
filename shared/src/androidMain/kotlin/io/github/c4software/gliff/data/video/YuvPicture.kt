@@ -41,6 +41,33 @@ class YuvImage {
     val u = YuvPlane()
     val v = YuvPlane()
 
+    /**
+     * This picture shrunk to at most `maxWidth` pixels across, one sample per
+     * thumbnail pixel: BT.709, limited range, as the renderer converts it.
+     */
+    fun thumbnail(maxWidth: Int): Thumbnail? {
+        if (width <= 0 || height <= 0) return null
+        val step = maxOf(1, (width + maxWidth - 1) / maxWidth)
+        val w = width / step
+        val h = height / step
+        val argb = IntArray(w * h)
+        for (row in 0 until h) {
+            val sy = row * step
+            for (col in 0 until w) {
+                val sx = col * step
+                val l = (y.data.get(sy * y.rowStride + sx).toInt() and 0xff) - 16
+                val c = (sy / 2) * u.rowStride + (sx / 2) * u.pixelStride
+                val cb = (u.data.get(c).toInt() and 0xff) - 128
+                val cr = (v.data.get((sy / 2) * v.rowStride + (sx / 2) * v.pixelStride).toInt() and 0xff) - 128
+                val r = (1.1644f * l + 1.7927f * cr).toInt().coerceIn(0, 255)
+                val g = (1.1644f * l - 0.2132f * cb - 0.5329f * cr).toInt().coerceIn(0, 255)
+                val b = (1.1644f * l + 2.1124f * cb).toInt().coerceIn(0, 255)
+                argb[row * w + col] = (0xff shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+        return Thumbnail(w, h, argb)
+    }
+
     fun copy(image: Image, width: Int, height: Int) {
         this.width = width
         this.height = height

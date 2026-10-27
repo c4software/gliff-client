@@ -30,9 +30,9 @@ Version shown in the screenshots: commit `e2d3a26`, before any tag
 
 | Order | en-US | fr-FR | What it shows |
 |---|---|---|---|
-| 1 | `01-session.png` | `01-session.png` | A session on a private screen, with the three floating buttons: touch mode, landscape, keyboard |
+| 1 | `01-session.png` | `01-session.png` | A session on a private screen, with the tab bar of the open sessions and the three floating buttons: touch mode, landscape, keyboard |
 | 2 | `02-keys.png` | `02-touches.png` | The same session with the row of extra keys (Esc, Tab, Ctrl, Alt, Super…) |
-| 3 | `03-machines.png` | `03-machines.png` | The machines: a private screen, a mirror of a named output, a machine never connected to |
+| 3 | `03-machines.png` | `03-machines.png` | The machines as tiles: a private screen and a mirror of a named output, each with its desktop's picture and an open session's dot, and a machine never connected to |
 | 4 | `04-options.png` | `04-options.png` | Options: scale, keyboard, touch, clipboard, keep awake, web mirror and its address |
 
 The tablet and desktop sets are the same four, landscape; the desktop's options also show full screen on a desktop.

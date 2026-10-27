@@ -2,6 +2,7 @@ package io.github.c4software.gliff.di
 
 import io.github.c4software.gliff.data.local.StoredMachineRepository
 import io.github.c4software.gliff.data.local.StoredSettingsRepository
+import io.github.c4software.gliff.data.preview.NoPreviews
 import io.github.c4software.gliff.data.session.Sessions
 import io.github.c4software.gliff.domain.machine.MachineRepository
 import io.github.c4software.gliff.domain.settings.SettingsRepository
@@ -26,6 +27,7 @@ val dataModule = module {
             clipboard = get(),
             logger = get(),
             decoders = get(),
+            previews = getOrNull() ?: NoPreviews,
         )
     }
 }

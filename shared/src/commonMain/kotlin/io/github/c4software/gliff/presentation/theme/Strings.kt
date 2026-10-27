@@ -19,6 +19,11 @@ interface Strings {
     val hostKeyNotSeen: String
     val edit: String
     val delete: String
+    val clone: String
+    val cloneMachine: String
+    val closeTab: String
+    val openAnother: String
+    val sessionOpen: String
     val cancel: String
     val save: String
     val close: String
@@ -90,6 +95,11 @@ object English : Strings {
     override val hostKeyNotSeen = "host key not seen yet"
     override val edit = "Edit"
     override val delete = "Delete"
+    override val clone = "Clone"
+    override val cloneMachine = "Clone machine"
+    override val closeTab = "Close the session"
+    override val openAnother = "Open another machine"
+    override val sessionOpen = "Session open"
     override val cancel = "Cancel"
     override val save = "Save"
     override val close = "Close"
@@ -168,6 +178,11 @@ object French : Strings {
     override val hostKeyNotSeen = "clé d'hôte pas encore vue"
     override val edit = "Modifier"
     override val delete = "Supprimer"
+    override val clone = "Cloner"
+    override val cloneMachine = "Cloner la machine"
+    override val closeTab = "Fermer la session"
+    override val openAnother = "Ouvrir une autre machine"
+    override val sessionOpen = "Session ouverte"
     override val cancel = "Annuler"
     override val save = "Enregistrer"
     override val close = "Fermer"

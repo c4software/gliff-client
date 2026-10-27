@@ -1,30 +1,37 @@
 package io.github.c4software.gliff.presentation.machines
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -40,16 +47,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.c4software.gliff.domain.machine.Machine
 import io.github.c4software.gliff.presentation.settings.ResolutionPicker
@@ -79,6 +93,7 @@ fun MachinesRoute(
     val state by viewModel.uiState.collectAsState()
     var showOptions by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Machine?>(null) }
+    var cloning by remember { mutableStateOf<Machine?>(null) }
     var adding by remember { mutableStateOf(false) }
     var showKey by remember { mutableStateOf(false) }
     LaunchedEffect(commands) {
@@ -97,6 +112,9 @@ fun MachinesRoute(
         onAdd = { adding = true },
         onEdit = { editing = it },
         onDelete = viewModel::remove,
+        onClone = { cloning = it },
+        previews = state.previews,
+        open = state.open,
         onShowKey = {
             viewModel.loadKey()
             showKey = true
@@ -114,18 +132,23 @@ fun MachinesRoute(
             onDismiss = { showOptions = false },
         )
     }
-    if (adding || editing != null) {
+    if (adding || editing != null || cloning != null) {
+        // A clone is a new machine with the same settings, its own id from the start.
+        val clone = cloning
         MachineDialog(
-            initial = editing,
+            initial = editing ?: clone?.let { remember(it) { it.copy(id = Machine.newId()) } },
             strings = strings,
+            title = if (clone != null) strings.cloneMachine else null,
             onDismiss = {
                 adding = false
                 editing = null
+                cloning = null
             },
             onSave = {
                 viewModel.save(it)
                 adding = false
                 editing = null
+                cloning = null
             },
         )
     }
@@ -143,6 +166,11 @@ fun MachinesContent(
     onDelete: (Machine) -> Unit,
     onShowKey: () -> Unit,
     onShowOptions: () -> Unit = {},
+    onClone: (Machine) -> Unit = {},
+    /** What each machine's screen last looked like, by machine id. */
+    previews: Map<String, ImageBitmap> = emptyMap(),
+    /** The machines whose session is open. */
+    open: Set<String> = emptySet(),
 ) {
     Scaffold(
         topBar = {
@@ -172,22 +200,35 @@ fun MachinesContent(
                 }
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 240.dp),
+                modifier = Modifier.fillMaxSize().padding(padding),
+                // Clear of the button floating over the last row.
+                contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 96.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
                 items(machines, key = { it.id }) { machine ->
-                    MachineRow(machine, strings, onOpen, onEdit, onDelete)
-                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    MachineTile(machine, previews[machine.id], machine.id in open, strings, onOpen, onEdit, onClone, onDelete)
                 }
             }
         }
     }
 }
 
+/**
+ * One machine: what its screen looked like last time, or its initial while
+ * it has never been seen, and a dot while its session is open.
+ */
 @Composable
-private fun MachineRow(
+private fun MachineTile(
     machine: Machine,
+    preview: ImageBitmap?,
+    open: Boolean,
     strings: Strings,
     onOpen: (Machine) -> Unit,
     onEdit: (Machine) -> Unit,
+    onClone: (Machine) -> Unit,
     onDelete: (Machine) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -196,8 +237,9 @@ private fun MachineRow(
         machine.output.isBlank() -> strings.mirror
         else -> strings.mirrorOf(machine.output.trim())
     }
-    ListItem(
-        // A right click or a long press opens the row's menu, as its button does.
+    val colors = MaterialTheme.colorScheme
+    Card(
+        // A right click or a long press opens the tile's menu, as its button does.
         modifier = Modifier
             .pointerInput(Unit) {
                 awaitPointerEventScope {
@@ -210,12 +252,48 @@ private fun MachineRow(
                     }
                 }
             }
+            .clip(CardDefaults.shape)
             .combinedClickable(onLongClick = { menu = true }) { onOpen(machine) },
-        headlineContent = { Text(machine.address) },
-        supportingContent = {
-            Text("$mode · " + (machine.hostKey?.let(::shortFingerprint) ?: strings.hostKeyNotSeen))
-        },
-        trailingContent = {
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(colors.surfaceVariant)) {
+            if (preview != null) {
+                Image(preview, contentDescription = null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+            } else {
+                Text(
+                    machine.host.take(1).uppercase(),
+                    Modifier.align(Alignment.Center),
+                    color = colors.onSurfaceVariant,
+                    style = MaterialTheme.typography.displayMedium,
+                )
+            }
+            if (open) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(OPEN_DOT)
+                        .semantics { contentDescription = strings.sessionOpen },
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    machine.address,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "$mode · " + (machine.hostKey?.let(::shortFingerprint) ?: strings.hostKeyNotSeen),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Box {
                 TextButton(onClick = { menu = true }) { Text("⋮", style = MaterialTheme.typography.titleLarge) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -223,15 +301,22 @@ private fun MachineRow(
                         menu = false
                         onEdit(machine)
                     })
+                    DropdownMenuItem(text = { Text(strings.clone) }, onClick = {
+                        menu = false
+                        onClone(machine)
+                    })
                     DropdownMenuItem(text = { Text(strings.delete) }, onClick = {
                         menu = false
                         onDelete(machine)
                     })
                 }
             }
-        },
-    )
+        }
+    }
 }
+
+/** A session running, as a status light shows it. */
+private val OPEN_DOT = Color(0xFF4CAF50)
 
 /** `SHA256:abcdefgh…wxyz`: enough to recognise a key at a glance. */
 internal fun shortFingerprint(fingerprint: String): String {
@@ -240,7 +325,14 @@ internal fun shortFingerprint(fingerprint: String): String {
 }
 
 @Composable
-fun MachineDialog(initial: Machine?, strings: Strings, onDismiss: () -> Unit, onSave: (Machine) -> Unit) {
+fun MachineDialog(
+    initial: Machine?,
+    strings: Strings,
+    onDismiss: () -> Unit,
+    onSave: (Machine) -> Unit,
+    /** Instead of adding or editing, as the dialog would say from `initial`. */
+    title: String? = null,
+) {
     var address by remember { mutableStateOf(initial?.address ?: "") }
     var headless by remember { mutableStateOf(initial?.headless ?: true) }
     var output by remember { mutableStateOf(initial?.output ?: "") }
@@ -254,7 +346,7 @@ fun MachineDialog(initial: Machine?, strings: Strings, onDismiss: () -> Unit, on
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) strings.addMachine else strings.editMachine) },
+        title = { Text(title ?: if (initial == null) strings.addMachine else strings.editMachine) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(

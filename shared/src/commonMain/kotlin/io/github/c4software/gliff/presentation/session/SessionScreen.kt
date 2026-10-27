@@ -142,6 +142,7 @@ fun SessionRoute(
     onLandscape: (Boolean) -> Unit = {},
     touchControls: Boolean = true,
     strings: Strings = rememberStrings(),
+    tabs: @Composable () -> Unit = {},
 ) {
     val ui by viewModel.uiState.collectAsState()
     val density = LocalDensity.current.density
@@ -162,6 +163,7 @@ fun SessionRoute(
         layout = viewModel::layout,
         send = viewModel::send,
         keyboard = { shown, sink -> SoftKeyboard(shown, sink) },
+        tabs = tabs,
     ) { modifier, picture ->
         VideoSurface(viewModel.decoder, viewModel::requestKeyframe, picture, modifier)
     }
@@ -192,6 +194,8 @@ fun SessionContent(
     keyboard: @Composable (shown: Boolean, sink: KeySink) -> Unit = { _, _ -> },
     keyboardOpen: Boolean = false,
     onClose: (() -> Unit)? = null,
+    /** Above the video: the window's other sessions, when it has tabs. */
+    tabs: @Composable () -> Unit = {},
     /** Draws the video: `fill` takes the whole area, `picture` is where the picture goes in it. */
     video: @Composable (fill: Modifier, picture: Box?) -> Unit,
 ) {
@@ -280,6 +284,7 @@ fun SessionContent(
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
         Column(Modifier.fillMaxSize()) {
+            tabs()
             Box(
                 Modifier
                     .weight(1f)

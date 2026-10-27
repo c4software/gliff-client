@@ -28,6 +28,12 @@ interface VideoDecoder {
 
     fun close()
 
+    /**
+     * Hand the next picture decoded, shrunk to a thumbnail, to `onPicture`,
+     * on whatever thread decodes. A decoder that cannot never calls it.
+     */
+    fun snapshot(onPicture: (Thumbnail) -> Unit) {}
+
     interface Listener {
         /** The frame left the decoder, or was dropped. */
         fun onFrameDone(frameId: Long)
@@ -50,3 +56,6 @@ interface FrameSink {
     /** One Annex B access unit, in decoding order. Must not block. */
     fun frame(data: ByteArray, keyframe: Boolean)
 }
+
+/** A small picture of a remote screen: `width x height` pixels, 0xAARRGGBB, row by row. */
+class Thumbnail(val width: Int, val height: Int, val argb: IntArray)

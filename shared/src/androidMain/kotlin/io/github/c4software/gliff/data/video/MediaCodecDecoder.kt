@@ -10,6 +10,7 @@ import android.os.HandlerThread
 import android.util.Log
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * H.264 through `MediaCodec`, into buffers a [VideoRenderer] draws: one codec
@@ -54,6 +55,9 @@ class MediaCodecDecoder : VideoDecoder {
 
     @Volatile
     private var waitingForKeyframe = true
+
+    /** Waiting for the next main picture, to make a thumbnail of it. */
+    private val snapshot = AtomicReference<((Thumbnail) -> Unit)?>()
 
     init {
         // What the device's AVC decoders accept, within what H.264 encoders produce.
@@ -128,6 +132,8 @@ class MediaCodecDecoder : VideoDecoder {
         }
     }
 
+    override fun snapshot(onPicture: (Thumbnail) -> Unit) = snapshot.set(onPicture)
+
     /** One codec gave `frameId` back, or never will: ack it once none owes it. */
     private fun done(frameId: Long) {
         var last = false
@@ -179,6 +185,8 @@ class MediaCodecDecoder : VideoDecoder {
 
     /** A picture came out of lane `index`: show it once whole. Either lane's thread. */
     private fun arrived(index: Int, paired: Boolean, renderer: VideoRenderer, frameId: Long, image: YuvImage) {
+        // Before the picture is passed on, which may recycle it any moment.
+        if (index == 0) snapshot.getAndSet(null)?.let { onPicture -> image.thumbnail(THUMBNAIL_WIDTH)?.let(onPicture) }
         if (!paired) {
             renderer.show(YuvPicture(image, null, free::add))
             return
@@ -396,5 +404,8 @@ class MediaCodecDecoder : VideoDecoder {
 
         /** About a fifth of a second at 60 fps: past that the codec is behind for good. */
         const val MAX_WAITING = 12
+
+        /** Wide enough for a tile of the machines' list on a large screen. */
+        const val THUMBNAIL_WIDTH = 480
     }
 }

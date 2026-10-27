@@ -1,6 +1,7 @@
 package io.github.c4software.gliff.android
 
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -12,6 +13,7 @@ import android.os.Bundle
 import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -45,28 +48,31 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.c4software.gliff.data.clipboard.AndroidClipboard
 import io.github.c4software.gliff.presentation.session.SessionRoute
+import io.github.c4software.gliff.presentation.session.SessionTabs
+import io.github.c4software.gliff.presentation.session.SessionTabsViewModel
 import io.github.c4software.gliff.presentation.session.SessionViewModel
 import io.github.c4software.gliff.presentation.theme.GliffTheme
 import kotlinx.coroutines.delay
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import org.koin.core.component.inject
-import org.koin.core.parameter.parametersOf
 
 /**
- * One machine's remote screen, in a task of its own so several machines can
- * sit side by side in desktop mode. The manifest keeps this activity alive
- * across size, rotation and display changes; the session itself belongs to
- * the application, so even a recreated activity finds it running.
+ * The remote screens, one tab per machine, in a task of their own beside the
+ * list. The manifest keeps this activity alive across size, rotation and
+ * display changes; the sessions themselves belong to the application, so even
+ * a recreated activity finds them running.
  */
 class SessionActivity : ComponentActivity(), KoinComponent {
-    private var machineId: String? = null
     private val clipboard: AndroidClipboard by inject()
 
-    /** Kept with the activity across its recreations; cleared, ending the session, when it finishes. */
-    private val viewModel: SessionViewModel by viewModels {
-        viewModelFactory { initializer { get<SessionViewModel> { parametersOf(machineId) } } }
+    /** Kept with the activity across its recreations; cleared, ending every session, when it finishes. */
+    private val tabs: SessionTabsViewModel by viewModels {
+        viewModelFactory { initializer { get<SessionTabsViewModel>() } }
     }
+
+    /** The session of the tab on screen, null between two. */
+    private var shown: SessionViewModel? = null
 
     /** The window's position is ours to choose: a phone's whole screen, not a window among others. */
     private var turns by mutableStateOf(false)
@@ -92,55 +98,91 @@ class SessionActivity : ComponentActivity(), KoinComponent {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         blendHeaderBar()
-        val id = intent.data?.lastPathSegment
-        if (id == null) {
+        // Recreated, the tabs are still there: the intent was opened already.
+        if (tabs.isEmpty) open(intent)
+        if (tabs.isEmpty) {
             finish()
             return
         }
-        machineId = id
-        val viewModel = viewModel
-        title = viewModel.uiState.value.address.ifEmpty { null } ?: title
         applyImmersion()
         applyOrientation()
         setContent {
-            val ui by viewModel.uiState.collectAsState()
-            LaunchedEffect(ui.keepAwake) {
-                val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                if (ui.keepAwake) window.addFlags(flag) else window.clearFlags(flag)
-            }
-            val darkens = ui.darkens
-            LaunchedEffect(darkens, touches) {
-                dark = false
-                if (darkens) {
-                    delay(DARK_AFTER_MS)
-                    dark = true
+            SessionTabs(tabs, onAdd = ::showMachines, onEmpty = ::finish) { viewModel, onClose, tabBar ->
+                DisposableEffect(viewModel) {
+                    shown = viewModel
+                    viewModel.onShown()
+                    title = viewModel.uiState.value.address.ifEmpty { null } ?: title
+                    // This session has not been told what the clipboard holds.
+                    clipboardSeen = -1L
+                    offerClipboard()
+                    onDispose { if (shown === viewModel) shown = null }
                 }
-            }
-            LaunchedEffect(dark) {
-                // As dim as the panel goes; on an OLED a black picture then lights nothing.
-                window.attributes = window.attributes.apply {
-                    screenBrightness = if (dark) {
-                        WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF
-                    } else {
-                        WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-                    }
-                }
-            }
-            GliffTheme {
-                SessionRoute(
-                    viewModel,
-                    onBack = ::finish,
-                    turns = turns,
-                    onLandscape = {
-                        landscape = it
-                        applyOrientation()
-                    },
-                    touchControls = touchControls,
-                )
-                HeaderTitle(ui.address)
-                if (dark) Box(Modifier.fillMaxSize().background(Color.Black))
+                Tab(viewModel, onClose, tabBar)
             }
         }
+    }
+
+    /** One tab's session on screen; `onClose` closes the tab, ending its session. */
+    @Composable
+    private fun Tab(viewModel: SessionViewModel, onClose: () -> Unit, tabBar: @Composable () -> Unit) {
+        // Back leaves this session alone; the last one leaving closes the window.
+        BackHandler(onBack = onClose)
+        val ui by viewModel.uiState.collectAsState()
+        LaunchedEffect(ui.keepAwake) {
+            val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            if (ui.keepAwake) window.addFlags(flag) else window.clearFlags(flag)
+        }
+        val darkens = ui.darkens
+        LaunchedEffect(darkens, touches) {
+            dark = false
+            if (darkens) {
+                delay(DARK_AFTER_MS)
+                dark = true
+            }
+        }
+        LaunchedEffect(dark) {
+            // As dim as the panel goes; on an OLED a black picture then lights nothing.
+            window.attributes = window.attributes.apply {
+                screenBrightness = if (dark) {
+                    WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF
+                } else {
+                    WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                }
+            }
+        }
+        GliffTheme {
+            SessionRoute(
+                viewModel,
+                onBack = onClose,
+                turns = turns,
+                onLandscape = {
+                    landscape = it
+                    applyOrientation()
+                },
+                touchControls = touchControls,
+                tabs = tabBar,
+            )
+            HeaderTitle(ui.address)
+            if (dark) Box(Modifier.fillMaxSize().background(Color.Black))
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        open(intent)
+    }
+
+    /** A machine opened from the list or a shortcut: its tab comes forward, made if need be. */
+    private fun open(intent: Intent) {
+        intent.data?.lastPathSegment?.let(tabs::open)
+    }
+
+    /** The list, in its own task, to open another machine there. */
+    private fun showMachines() {
+        startActivity(
+            Intent.makeMainActivity(ComponentName(this, MainActivity::class.java))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED),
+        )
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -155,7 +197,7 @@ class SessionActivity : ComponentActivity(), KoinComponent {
     override fun onResume() {
         super.onResume()
         // The web mirror shows the session whose window was used last.
-        if (machineId != null) viewModel.onShown()
+        shown?.onShown()
     }
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
@@ -184,7 +226,7 @@ class SessionActivity : ComponentActivity(), KoinComponent {
     private fun leaveDesktopWindow() {
         if (fullScreenAsked || Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
         fullScreenAsked = true
-        if (machineId != null && viewModel.uiState.value.desktopFullScreen && inDesktopWindow) {
+        if (shown?.uiState?.value?.desktopFullScreen == true && inDesktopWindow) {
             requestFullscreenMode(FULLSCREEN_MODE_REQUEST_ENTER, null)
         }
     }
@@ -198,7 +240,8 @@ class SessionActivity : ComponentActivity(), KoinComponent {
      * focused window may read it, hence here and not in the background.
      */
     private fun offerClipboard() {
-        if (!hasWindowFocus() || machineId == null || !viewModel.sharesClipboard()) return
+        val viewModel = shown ?: return
+        if (!hasWindowFocus() || !viewModel.sharesClipboard()) return
         val content = clipboard.read(clipboardSeen) ?: return
         clipboardSeen = content.timestamp
         viewModel.localClipboard(content.text)
@@ -264,11 +307,10 @@ class SessionActivity : ComponentActivity(), KoinComponent {
         /** How long the screen stays lit after a touch while a browser watches. */
         private const val DARK_AFTER_MS = 5000L
 
-        /** One task per machine: opening a machine again brings its window back. */
+        /** Into the sessions' window: opening a machine again brings its tab back. */
         fun intent(context: Context, machineId: String): Intent =
             Intent(context, SessionActivity::class.java)
                 .setData(Uri.Builder().scheme("gliff").authority("session").appendPath(machineId).build())
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
     }
 }
 
