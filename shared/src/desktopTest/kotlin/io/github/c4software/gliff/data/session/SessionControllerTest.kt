@@ -261,6 +261,21 @@ class SessionControllerTest {
     }
 
     @Test
+    fun aRequestTooSoonIsSentOnceTheGapIsOver() {
+        val c = SessionController(machine.id, machines, connector, decoder, scope, Dispatchers.IO, { 10_000L })
+        trusted()
+        c.start()
+        val p = peer()
+        p.handshake(config())
+        // The session asks as its tab comes forward, then the decoder of the new surface.
+        repeat(3) { c.requestKeyframe() }
+        assertEquals(ClientMsg.RequestKeyframe, p.expect())
+        assertEquals(ClientMsg.RequestKeyframe, p.expect())
+        c.close()
+        assertEquals(ClientMsg.Bye, p.expect())
+    }
+
+    @Test
     fun anIncompatibleServerIsNotWorthRetrying() {
         trusted()
         controller.start()

@@ -35,15 +35,14 @@
             makes it. configChanges keeps the activity (and the video surface)
             through a resize, a rotation, a move to another display or a
             keyboard being plugged in; without it each of those would recreate
-            the activity. One instance in a task of its own, beside the list's:
-            each machine opened is a tab in it. adjustResize reports the on-screen keyboard as an inset, which the
+            the activity. One instance, over the list in the list's task (one
+            window on a desktop): each machine opened is a tab in it. adjustResize reports the on-screen keyboard as an inset, which the
             screen uses to keep the picture above it.
         -->
         <activity
             android:name=".SessionActivity"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"
             android:launchMode="singleTask"
-            android:taskAffinity="${applicationId}.sessions"
             android:exported="false"
             android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
     </application>

@@ -1,3 +1,3 @@
 • Les machines s'affichent en tuiles, avec un aperçu de leur bureau pris quelques secondes après la connexion, et une pastille tant que leur session est ouverte.
 • Cloner une machine depuis son menu reprend ses réglages, pour ne changer que ce qui diffère.
-• Les sessions ouvertes sont des onglets dans une même fenêtre : passer de l'une à l'autre, en fermer une, ou + pour ouvrir une autre machine.
+• Les sessions ouvertes sont des onglets, dans la même fenêtre que la liste : passer de l'une à l'autre, en fermer une, ou + pour ouvrir une autre machine.

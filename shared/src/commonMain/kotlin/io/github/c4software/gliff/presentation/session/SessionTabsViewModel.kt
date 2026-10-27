@@ -19,6 +19,8 @@ data class SessionTabsUiState(
     val tabs: List<SessionTab> = emptyList(),
     /** The tab on screen, null once the last one is closed. */
     val selected: String? = null,
+    /** The machines' list is on screen instead, to open another one. */
+    val listing: Boolean = false,
 )
 
 /**
@@ -29,11 +31,12 @@ data class SessionTabsUiState(
 class SessionTabsViewModel(machines: MachineRepository) : ViewModel() {
     private val ids = MutableStateFlow<List<String>>(emptyList())
     private val selected = MutableStateFlow<String?>(null)
+    private val listing = MutableStateFlow(false)
     private val owners = mutableMapOf<String, ViewModelStoreOwner>()
 
     val uiState: StateFlow<SessionTabsUiState> =
-        combine(ids, selected, machines.machines) { open, current, all ->
-            SessionTabsUiState(open.map { id -> SessionTab(id, all.firstOrNull { it.id == id }) }, current)
+        combine(ids, selected, listing, machines.machines) { open, current, list, all ->
+            SessionTabsUiState(open.map { id -> SessionTab(id, all.firstOrNull { it.id == id }) }, current, list)
         }.stateIn(viewModelScope, UiStateSharing, SessionTabsUiState())
 
     /** No tab is open. */
@@ -43,10 +46,18 @@ class SessionTabsViewModel(machines: MachineRepository) : ViewModel() {
     fun open(machineId: String) {
         if (machineId !in ids.value) ids.value += machineId
         selected.value = machineId
+        listing.value = false
     }
 
     fun select(machineId: String) {
-        if (machineId in ids.value) selected.value = machineId
+        if (machineId !in ids.value) return
+        selected.value = machineId
+        listing.value = false
+    }
+
+    /** Show the machines' list, or (false) the selected tab again. */
+    fun showList(shown: Boolean) {
+        listing.value = shown
     }
 
     /** Close `machineId`'s tab, ending its session; the one next to it comes forward. */

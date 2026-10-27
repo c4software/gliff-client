@@ -5,6 +5,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -121,14 +129,15 @@ private fun tabLabel(machine: Machine?, tabs: List<SessionTab>, strings: Strings
 /**
  * The selected tab's session, each tab with its own ViewModels and screen
  * state (pointer, keyboard, zoom). `content` draws it, given how to close the
- * tab and the tab bar to put above the picture. `onEmpty`: the last tab was
- * closed. `onAdd`: the user wants the list, to open another machine.
+ * tab and the tab bar to put above the picture. The tab bar's + shows
+ * `machines` in its place, under the tabs, in the same window; it is given
+ * what opens a machine in a tab. `onEmpty`: the last tab was closed.
  */
 @Composable
 fun SessionTabs(
     tabs: SessionTabsViewModel,
-    onAdd: () -> Unit,
     onEmpty: () -> Unit,
+    machines: @Composable (onOpen: (Machine) -> Unit) -> Unit,
     strings: Strings = rememberStrings(),
     content: @Composable (viewModel: SessionViewModel, onClose: () -> Unit, tabBar: @Composable () -> Unit) -> Unit,
 ) {
@@ -139,12 +148,25 @@ fun SessionTabs(
         if (tabs.isEmpty) LaunchedEffect(Unit) { onEmpty() }
         return
     }
+    if (state.listing) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            Box(Modifier.background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing.only(TOP_AND_SIDES))) {
+                SessionTabBar(state.tabs, null, strings, tabs::select, tabs::close) {}
+            }
+            Box(Modifier.weight(1f).consumeWindowInsets(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
+                machines { tabs.open(it.id) }
+            }
+        }
+        return
+    }
     key(machineId) {
         CompositionLocalProvider(LocalViewModelStoreOwner provides tabs.owner(machineId)) {
             val viewModel = koinViewModel<SessionViewModel> { parametersOf(machineId) }
             content(viewModel, { tabs.close(machineId) }) {
-                SessionTabBar(state.tabs, machineId, strings, tabs::select, tabs::close, onAdd)
+                SessionTabBar(state.tabs, machineId, strings, tabs::select, tabs::close) { tabs.showList(true) }
             }
         }
     }
 }
+
+private val TOP_AND_SIDES = WindowInsetsSides.Top + WindowInsetsSides.Horizontal

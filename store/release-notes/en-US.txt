@@ -1,3 +1,3 @@
 • Machines show as tiles, with a picture of their desktop taken a few seconds after connecting, and a dot while their session is open.
 • Clone a machine from its menu, to keep its settings and change only what differs.
-• Open sessions are tabs in one window: switch between them, close one, or press + to open another machine.
+• Open sessions are tabs, in the same window as the list: switch between them, close one, or press + to open another machine.

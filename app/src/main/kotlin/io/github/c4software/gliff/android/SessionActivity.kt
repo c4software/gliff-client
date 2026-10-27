@@ -1,7 +1,6 @@
 package io.github.c4software.gliff.android
 
 import android.content.ClipboardManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -47,6 +46,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import io.github.c4software.gliff.data.clipboard.AndroidClipboard
+import io.github.c4software.gliff.presentation.machines.MachinesRoute
 import io.github.c4software.gliff.presentation.session.SessionRoute
 import io.github.c4software.gliff.presentation.session.SessionTabs
 import io.github.c4software.gliff.presentation.session.SessionTabsViewModel
@@ -58,8 +58,8 @@ import org.koin.core.component.get
 import org.koin.core.component.inject
 
 /**
- * The remote screens, one tab per machine, in a task of their own beside the
- * list. The manifest keeps this activity alive across size, rotation and
+ * The remote screens, one tab per machine, over the list in the same task:
+ * on a desktop, one window. Its + shows the list in the window again. The manifest keeps this activity alive across size, rotation and
  * display changes; the sessions themselves belong to the application, so even
  * a recreated activity finds them running.
  */
@@ -107,7 +107,17 @@ class SessionActivity : ComponentActivity(), KoinComponent {
         applyImmersion()
         applyOrientation()
         setContent {
-            SessionTabs(tabs, onAdd = ::showMachines, onEmpty = ::finish) { viewModel, onClose, tabBar ->
+            SessionTabs(
+                tabs,
+                onEmpty = ::finish,
+                machines = { onOpen ->
+                    // Back gives the tab its screen again.
+                    BackHandler { tabs.showList(false) }
+                    GliffTheme {
+                        MachinesRoute(onOpen, desktop = Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM)
+                    }
+                },
+            ) { viewModel, onClose, tabBar ->
                 DisposableEffect(viewModel) {
                     shown = viewModel
                     viewModel.onShown()
@@ -175,14 +185,6 @@ class SessionActivity : ComponentActivity(), KoinComponent {
     /** A machine opened from the list or a shortcut: its tab comes forward, made if need be. */
     private fun open(intent: Intent) {
         intent.data?.lastPathSegment?.let(tabs::open)
-    }
-
-    /** The list, in its own task, to open another machine there. */
-    private fun showMachines() {
-        startActivity(
-            Intent.makeMainActivity(ComponentName(this, MainActivity::class.java))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED),
-        )
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {

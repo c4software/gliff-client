@@ -1,12 +1,9 @@
 package io.github.c4software.gliff.android
 
 import android.app.Activity
-import android.app.ActivityOptions
 import android.content.res.Configuration
-import android.graphics.Rect
 import android.hardware.input.InputManager
 import android.os.Build
-import android.os.Bundle
 import android.view.InputDevice
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -29,25 +26,6 @@ internal fun Activity.blendHeaderBar() {
         WindowInsetsController.APPEARANCE_TRANSPARENT_CAPTION_BAR_BACKGROUND or
             WindowInsetsController.APPEARANCE_LIGHT_CAPTION_BARS,
     )
-}
-
-/**
- * From a desktop window, a session opens in a 16:9 window centred on the
- * display, rather than the system's default, often shaped like a phone: the
- * remote's resolution follows the window. Elsewhere, no options.
- */
-internal fun Activity.sessionLaunchOptions(): Bundle? {
-    if (!inDesktopWindow || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
-    val display = windowManager.maximumWindowMetrics.bounds
-    var width = display.width() * 7 / 10
-    var height = width * 9 / 16
-    if (height > display.height() * 8 / 10) {
-        height = display.height() * 8 / 10
-        width = height * 16 / 9
-    }
-    val left = display.left + (display.width() - width) / 2
-    val top = display.top + (display.height() - height) / 2
-    return ActivityOptions.makeBasic().setLaunchBounds(Rect(left, top, left + width, top + height)).toBundle()
 }
 
 /**

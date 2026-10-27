@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             GliffTheme {
                 MachinesRoute(
-                    onOpen = { startActivity(SessionActivity.intent(this, it.id), sessionLaunchOptions()) },
+                    onOpen = { startActivity(SessionActivity.intent(this, it.id)) },
                     commands = commands,
                     desktop = Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM,
                 )

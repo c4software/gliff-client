@@ -109,6 +109,10 @@ class SessionController(
     @Volatile
     private var lastKeyframeRequestMs = 0L
 
+    /** A request came too soon after the last one, and waits for the gap to be over. */
+    @Volatile
+    private var keyframeDeferred = false
+
     /** Connect, or connect again after a failure. */
     fun start() {
         if (closed) return
@@ -252,9 +256,26 @@ class SessionController(
     /** The video surface is back (or new): the decoder needs a keyframe to draw on it. */
     fun requestKeyframe() {
         val now = clock.nowMs()
-        if (now - lastKeyframeRequestMs < KEYFRAME_REQUEST_GAP_MS) return
-        lastKeyframeRequestMs = now
-        session?.send(ClientMsg.RequestKeyframe)
+        val wait = lastKeyframeRequestMs + KEYFRAME_REQUEST_GAP_MS - now
+        if (wait <= 0) {
+            lastKeyframeRequestMs = now
+            session?.send(ClientMsg.RequestKeyframe)
+            return
+        }
+        // Not merged into the last one: that keyframe may have come before
+        // the decoder could take it, as when a tab is brought forward (the
+        // session asks, then the new surface's decoder does). Asked again
+        // once the gap is over, unless another request went out meanwhile.
+        if (keyframeDeferred) return
+        keyframeDeferred = true
+        val asked = lastKeyframeRequestMs
+        scope.launch {
+            delay(wait)
+            keyframeDeferred = false
+            if (lastKeyframeRequestMs != asked) return@launch
+            lastKeyframeRequestMs = clock.nowMs()
+            session?.send(ClientMsg.RequestKeyframe)
+        }
     }
 
     private fun sendResize() {
